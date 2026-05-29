@@ -24,6 +24,8 @@ type HighlightItem = BaseItem & {
   color: string;
   opacity: number;
   labelColor: string;
+  labelX?: number;
+  labelY?: number;
   fontSize: number;
   note?: string;
 };
@@ -58,6 +60,7 @@ type DragState =
   | { tool: "balloon"; anchorX: number; anchorY: number; currentX: number; currentY: number }
   | { tool: "move"; itemId: string; startX: number; startY: number; original: MarkItem }
   | { tool: "resize-highlight"; itemId: string; handle: "nw" | "ne" | "sw" | "se"; startX: number; startY: number; original: HighlightItem }
+  | { tool: "move-highlight-label"; itemId: string }
   | { tool: "move-balloon-anchor"; itemId: string }
   | { tool: "move-balloon-circle"; itemId: string }
   | null;
@@ -610,7 +613,13 @@ export default function App() {
         current.map((item) => {
           if (item.id !== drag.itemId) return item;
           if (original.type === "highlight") {
-            return { ...original, x: original.x + dx, y: original.y + dy };
+            return {
+              ...original,
+              x: original.x + dx,
+              y: original.y + dy,
+              labelX: original.labelX === undefined ? undefined : original.labelX + dx,
+              labelY: original.labelY === undefined ? undefined : original.labelY + dy
+            };
           }
           if (original.type === "balloon") {
             return {
@@ -636,6 +645,10 @@ export default function App() {
       if (drag.handle.includes("e")) x1 = point.x;
       const rect = normalizeRect(x0, y0, x1, y1);
       setItems((current) => current.map((item) => (item.id === drag.itemId ? { ...original, ...rect } : item)));
+    } else if (drag.tool === "move-highlight-label") {
+      setItems((current) =>
+        current.map((item) => item.id === drag.itemId && item.type === "highlight" ? { ...item, labelX: point.x, labelY: point.y } : item)
+      );
     } else if (drag.tool === "move-balloon-anchor") {
       setItems((current) =>
         current.map((item) => item.id === drag.itemId && item.type === "balloon" ? { ...item, anchorX: point.x, anchorY: point.y } : item)
@@ -661,6 +674,8 @@ export default function App() {
       setDrag(null);
       if (rect.width < 4 || rect.height < 4) return;
       const note = window.prompt(t.promptNote) ?? "";
+      const labelX = rect.x + rect.width + 6;
+      const labelY = Math.max(12, rect.y - 4);
       setItems((current) => [
         ...current,
         {
@@ -672,6 +687,8 @@ export default function App() {
           color: markerColor,
           opacity: markerOpacity,
           labelColor: textColor,
+          labelX,
+          labelY,
           fontSize,
           note
         }
@@ -856,6 +873,11 @@ export default function App() {
     setDrag({ tool: "resize-highlight", itemId: item.id, handle, startX: 0, startY: 0, original: item });
   };
 
+  const startMoveHighlightLabel = (item: HighlightItem) => {
+    setSelectedId(item.id);
+    setDrag({ tool: "move-highlight-label", itemId: item.id });
+  };
+
   const startMoveBalloonPart = (item: BalloonItem, part: "anchor" | "circle") => {
     setSelectedId(item.id);
     setDrag({ tool: part === "anchor" ? "move-balloon-anchor" : "move-balloon-circle", itemId: item.id });
@@ -1022,6 +1044,7 @@ export default function App() {
                     onSelect={setSelectedId}
                     onStartMove={(targetItem, event) => startMoveItem(targetItem, toPagePoint(event.clientX, event.clientY))}
                     onStartResize={startResizeHighlight}
+                    onStartMoveHighlightLabel={startMoveHighlightLabel}
                     onStartMoveBalloonPart={startMoveBalloonPart}
                   />
                 ))}
@@ -1152,6 +1175,7 @@ function OverlayItem({
   onSelect,
   onStartMove,
   onStartResize,
+  onStartMoveHighlightLabel,
   onStartMoveBalloonPart
 }: {
   item: MarkItem;
@@ -1159,6 +1183,7 @@ function OverlayItem({
   onSelect: (id: string) => void;
   onStartMove: (item: MarkItem, event: React.PointerEvent) => void;
   onStartResize: (item: HighlightItem, handle: "nw" | "ne" | "sw" | "se") => void;
+  onStartMoveHighlightLabel: (item: HighlightItem) => void;
   onStartMoveBalloonPart: (item: BalloonItem, part: "anchor" | "circle") => void;
 }) {
   const common = {
@@ -1171,10 +1196,26 @@ function OverlayItem({
   };
 
   if (item.type === "highlight") {
+    const labelX = item.labelX ?? item.x + item.width + 6;
+    const labelY = item.labelY ?? Math.max(12, item.y - 4);
     return (
       <g {...common}>
         <rect x={item.x} y={item.y} width={item.width} height={item.height} fill={item.color} opacity={item.opacity} stroke="#d1a900" strokeWidth={1} />
-        <text x={item.x + item.width + 6} y={Math.max(12, item.y - 4)} fill={item.labelColor} fontSize={item.fontSize} fontWeight="700">No.{item.number}</text>
+        <text
+          className="label-handle"
+          x={labelX}
+          y={labelY}
+          fill={item.labelColor}
+          fontSize={item.fontSize}
+          fontWeight="700"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            onSelect(item.id);
+            onStartMoveHighlightLabel(item);
+          }}
+        >
+          No.{item.number}
+        </text>
         {item.note ? <text x={item.x} y={item.y + item.height + item.fontSize + 4} fill={item.labelColor} fontSize={item.fontSize}>{item.note}</text> : null}
         {selected ? (
           <>
